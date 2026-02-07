@@ -69,6 +69,9 @@ contract SmartAccount is Receiver {
     /// @notice Reverts when address is zero
     error ZeroAddress();
 
+    /// @notice Reverts when executions are invalid
+    error InvalidExecutions();
+
     /// @notice Constructor, initializes NonceTracker contract address
     /// @param nonceTracker_ NonceTracker contract address, must not be zero
     constructor(address nonceTracker_) {
@@ -104,7 +107,10 @@ contract SmartAccount is Receiver {
     /// @param _executions Array of calls to execute
     /// @custom:security Only callable by the contract itself, protected by onlySelf modifier
     function execute(Execution[] calldata _executions) external payable onlySelf {
+        if (_executions.length == 0) revert InvalidExecutions();
+
         for (uint256 i = 0; i < _executions.length; i++) {
+            if (_executions[i].target == address(0)) revert ZeroAddress();
             (bool success,) = _executions[i].target.call{value: _executions[i].value}(_executions[i].callData);
             if (!success) revert ExecutionFailed(i);
         }
@@ -127,6 +133,7 @@ contract SmartAccount is Receiver {
         payable
     {
         if (_expiry > 0 && block.timestamp >= _expiry) revert SignatureExpired();
+        if (_executions.length == 0) revert InvalidExecutions();
 
         bytes32 hash = makeExecuteHash(_nonce, _expiry, _executions);
 
@@ -138,6 +145,7 @@ contract SmartAccount is Receiver {
         NONCE_TRACKER.useNonce(_nonce);
 
         for (uint256 i = 0; i < _executions.length; i++) {
+            if (_executions[i].target == address(0)) revert ZeroAddress();
             (bool success,) = _executions[i].target.call{value: _executions[i].value}(_executions[i].callData);
             if (!success) revert ExecutionFailed(i);
         }
@@ -189,8 +197,16 @@ contract SmartAccount is Receiver {
     /// @dev Domain separator distinguishes signatures across contracts and chains, preventing cross-chain replay
     /// @return EIP-712 domain separator for this contract
     function domainSeparator() public view returns (bytes32) {
-        return
-            keccak256(abi.encode(_EIP712_DOMAIN_TYPEHASH, _DOMAIN_NAME, _DOMAIN_VERSION, block.chainid, SMART_ACCOUNT_CONTRACT_ADDRESS, bytes32(uint256(uint160(address(this))))));
+        return keccak256(
+            abi.encode(
+                _EIP712_DOMAIN_TYPEHASH,
+                _DOMAIN_NAME,
+                _DOMAIN_VERSION,
+                block.chainid,
+                SMART_ACCOUNT_CONTRACT_ADDRESS,
+                bytes32(uint256(uint160(address(this))))
+            )
+        );
     }
 
     /// @notice Converts struct hash to EIP-712 message hash
